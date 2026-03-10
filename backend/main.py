@@ -14,8 +14,9 @@ from backend.auth import (
     verify_password, get_password_hash, create_access_token,
     decode_token
 )
+from backend.voice_service import voice_service
 from passlib.context import CryptContext
-from typing import List
+from typing import List, Dict
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -366,6 +367,40 @@ def delete_senior_executive(executive_id: int, db: Session = Depends(get_db), cu
     db.delete(executive)
     db.commit()
     return {"message": "Senior executive deleted successfully"}
+
+
+@app.post("/api/interview/chat")
+def interview_chat(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    user, role = current_user
+    if role != "candidate":
+        raise HTTPException(status_code=403, detail="Only candidates can interview")
+    
+    job_id = payload.get("job_id")
+    history = payload.get("history", [])
+    
+    job = db.query(JobPosting).filter(JobPosting.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    job_details = {
+        "title": job.title,
+        "description": job.description,
+        "skills_required": job.skills_required,
+        "questions_to_ask": job.questions_to_ask
+    }
+    
+    candidate_details = {
+        "name": user.name,
+        "experience": user.experience,
+        "skills": user.skills
+    }
+    
+    ai_response = voice_service.get_response(history, job_details, candidate_details)
+    return {"response": ai_response}
 
 
 if __name__ == "__main__":

@@ -157,5 +157,15 @@ class APIService:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to create HR"))
 
+    def interview_chat(self, job_id: int, history: List[Dict[str, str]]) -> Dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}/api/interview/chat",
+            json={"job_id": job_id, "history": history},
+            headers=self._get_headers()
+        )
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to get AI response"))
+
 
 api = APIService()

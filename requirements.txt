@@ -8,3 +8,5 @@ python-multipart==0.0.6
 pydantic==2.5.3
 streamlit==1.30.0
 requests==2.31.0
+google-generativeai
+faster-whisper
