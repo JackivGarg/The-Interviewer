@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from backend.database import engine, Base, SessionLocal
-from backend.models import CEO, HR, Candidate, JobPosting, CandidateApplication
+from backend.models import SeniorExecutive, HR, Candidate, JobPosting, CandidateApplication
 from backend.schemas import (
     HRCreate, HRResponse, CandidateCreate, CandidateResponse,
     LoginRequest, TokenResponse, JobPostingCreate, JobPostingResponse,
     JobPostingListResponse, CandidateApplicationCreate, CandidateApplicationResponse,
-    ApplicationWithJobResponse
+    ApplicationWithJobResponse, SeniorExecutiveCreate, SeniorExecutiveResponse
 )
 from backend.auth import (
     verify_password, get_password_hash, create_access_token,
@@ -50,8 +50,8 @@ def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    if role == "ceo":
-        user = db.query(CEO).filter(CEO.name == "Jackiv Garg").first()
+    if role in ["ceo", "coo", "cto"]:
+        user = db.query(SeniorExecutive).filter(SeniorExecutive.email == email).first()
     elif role == "hr":
         user = db.query(HR).filter(HR.email == email).first()
     elif role == "candidate":
@@ -67,10 +67,10 @@ def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 try:
-    existing_ceo = db.query(CEO).filter(CEO.name == "Jackiv Garg").first()
+    existing_ceo = db.query(SeniorExecutive).filter(SeniorExecutive.is_ceo == "yes").first()
     if not existing_ceo:
         hashed_password = pwd_context.hash("admin@123")
-        ceo = CEO(name="Jackiv Garg", password=hashed_password)
+        ceo = SeniorExecutive(name="Jackiv Garg", email="jackivgarg@gmail.com", password=hashed_password, role="CEO", is_ceo="yes")
         db.add(ceo)
         db.commit()
 finally:
@@ -79,10 +79,11 @@ finally:
 
 @app.post("/login", response_model=TokenResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    ceo = db.query(CEO).filter(CEO.name == "Jackiv Garg").first()
-    if ceo and verify_password(request.password, ceo.password):
-        token = create_access_token({"sub": ceo.name, "role": "ceo"})
-        return TokenResponse(access_token=token, token_type="bearer", role="ceo")
+    executive = db.query(SeniorExecutive).filter(SeniorExecutive.email == request.email).first()
+    if executive and verify_password(request.password, executive.password):
+        role = executive.role.lower()
+        token = create_access_token({"sub": executive.email, "role": role})
+        return TokenResponse(access_token=token, token_type="bearer", role=role)
     
     hr = db.query(HR).filter(HR.email == request.email).first()
     if hr and verify_password(request.password, hr.password):
@@ -255,7 +256,116 @@ def get_job_applications(
 @app.get("/candidates", response_model=List[CandidateResponse])
 def get_candidates(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     user, role = current_user
+    if role not in ["ceo", "hr"]:
+        raise HTTPException(status_code=403, detail="Only CEO or HR can view candidates")
     return db.query(Candidate).all()
+
+
+@app.get("/hr/all", response_model=List[HRResponse])
+def get_all_hr(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view all HR")
+    return db.query(HR).all()
+
+
+@app.get("/ceo/candidates", response_model=List[CandidateResponse])
+def get_ceo_candidates(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view all candidates")
+    return db.query(Candidate).all()
+
+
+@app.get("/ceo/hr-activity", response_model=List[JobPostingResponse])
+def get_ceo_hr_activity(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view HR activity")
+    return db.query(JobPosting).all()
+
+
+@app.get("/ceo/applications", response_model=List[CandidateApplicationResponse])
+def get_ceo_applications(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view all applications")
+    return db.query(CandidateApplication).all()
+
+
+@app.get("/ceo/profile")
+def get_ceo_profile(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view profile")
+    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
+
+
+@app.put("/ceo/profile")
+def update_ceo_profile(name: str, email: str, password: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can update profile")
+    
+    existing = db.query(SeniorExecutive).filter(SeniorExecutive.email == email, SeniorExecutive.id != user.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already in use")
+    
+    user.name = name
+    user.email = email
+    if password:
+        user.password = get_password_hash(password)
+    
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
+
+
+@app.get("/senior-executives", response_model=List[SeniorExecutiveResponse])
+def get_senior_executives(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can view senior executives")
+    return db.query(SeniorExecutive).all()
+
+
+@app.post("/senior-executives", response_model=SeniorExecutiveResponse)
+def create_senior_executive(executive: SeniorExecutiveCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can add senior executives")
+    
+    existing = db.query(SeniorExecutive).filter(SeniorExecutive.email == executive.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_password = get_password_hash(executive.password)
+    new_executive = SeniorExecutive(
+        name=executive.name,
+        email=executive.email,
+        password=hashed_password,
+        role=executive.role,
+        is_ceo="no"
+    )
+    db.add(new_executive)
+    db.commit()
+    db.refresh(new_executive)
+    return new_executive
+
+
+@app.delete("/senior-executives/{executive_id}")
+def delete_senior_executive(executive_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    user, role = current_user
+    if role != "ceo":
+        raise HTTPException(status_code=403, detail="Only CEO can delete senior executives")
+    
+    executive = db.query(SeniorExecutive).filter(SeniorExecutive.id == executive_id, SeniorExecutive.is_ceo == "no").first()
+    if not executive:
+        raise HTTPException(status_code=404, detail="Senior executive not found or cannot delete CEO")
+    
+    db.delete(executive)
+    db.commit()
+    return {"message": "Senior executive deleted successfully"}
 
 
 if __name__ == "__main__":

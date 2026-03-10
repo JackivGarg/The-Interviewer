@@ -2,6 +2,23 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 
+class SeniorExecutiveCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str  # CEO, COO, CTO, etc.
+
+
+class SeniorExecutiveResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
 class HRCreate(BaseModel):
     name: str
     email: str

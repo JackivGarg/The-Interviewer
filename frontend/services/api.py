@@ -97,6 +97,65 @@ class APIService:
         if response.status_code == 200:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to fetch applications"))
+    
+    def get_all_hr(self) -> List[Dict[str, Any]]:
+        response = requests.get(f"{self.base_url}/hr/all", headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to fetch HR"))
+    
+    def get_all_candidates(self) -> List[Dict[str, Any]]:
+        response = requests.get(f"{self.base_url}/ceo/candidates", headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to fetch candidates"))
+    
+    def get_ceo_profile(self) -> Dict[str, Any]:
+        response = requests.get(f"{self.base_url}/ceo/profile", headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to fetch profile"))
+    
+    def update_ceo_profile(self, name: str, email: str, password: str = None) -> Dict[str, Any]:
+        payload = {"name": name, "email": email}
+        if password and password.strip():
+            payload["password"] = password
+        response = requests.put(f"{self.base_url}/ceo/profile", json=payload, headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to update profile"))
+    
+    def get_all_senior_executives(self) -> List[Dict[str, Any]]:
+        response = requests.get(f"{self.base_url}/senior-executives", headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to fetch senior executives"))
+    
+    def create_senior_executive(self, name: str, email: str, password: str, role: str) -> Dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}/senior-executives",
+            json={"name": name, "email": email, "password": password, "role": role},
+            headers=self._get_headers()
+        )
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to create senior executive"))
+    
+    def delete_senior_executive(self, executive_id: int) -> Dict[str, Any]:
+        response = requests.delete(f"{self.base_url}/senior-executives/{executive_id}", headers=self._get_headers())
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to delete senior executive"))
+    
+    def create_hr(self, name: str, email: str, password: str) -> Dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}/signup/hr",
+            json={"name": name, "email": email, "password": password},
+            headers=self._get_headers()
+        )
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to create HR"))
 
 
 api = APIService()

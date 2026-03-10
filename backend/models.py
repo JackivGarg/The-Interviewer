@@ -3,12 +3,15 @@ from sqlalchemy.orm import relationship
 from backend.database import Base
 
 
-class CEO(Base):
-    __tablename__ = "ceo"
+class SeniorExecutive(Base):
+    __tablename__ = "senior_executives"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, default="Jackiv Garg")
-    password = Column(String)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # CEO, COO, CTO, etc.
+    is_ceo = Column(String, default="no")
 
 
 class HR(Base):
