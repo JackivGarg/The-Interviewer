@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Security
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Security, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from backend.auth import (
     decode_token
 )
 from backend.voice_service import voice_service
+from backend.services.voice_handler import handle_voice_session
 from passlib.context import CryptContext
 from typing import List, Dict
 
@@ -401,6 +402,55 @@ def interview_chat(
     
     ai_response = voice_service.get_response(history, job_details, candidate_details)
     return {"response": ai_response}
+
+
+@app.websocket("/api/ws/interview/{job_id}")
+async def websocket_interview(websocket: WebSocket, job_id: int):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+        
+    db = next(get_db())
+    try:
+        payload = decode_token(token)
+        email = payload.get("sub")
+        role = payload.get("role")
+        if email is None or role != "candidate":
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        candidate = db.query(Candidate).filter(Candidate.email == email).first()
+        if not candidate:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        job = db.query(JobPosting).filter(JobPosting.id == job_id).first()
+        if not job:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        job_details = {
+            "title": job.title,
+            "description": job.description,
+            "skills_required": job.skills_required,
+            "questions_to_ask": job.questions_to_ask
+        }
+        
+        candidate_details = {
+            "name": candidate.name,
+            "experience": candidate.experience,
+            "skills": candidate.skills
+        }
+        
+        await handle_voice_session(websocket, job_details, candidate_details)
+        
+    except Exception as e:
+        print(f"WebSocket auth/connection error: {e}")
+        try:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
