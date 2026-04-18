@@ -1,8 +1,22 @@
 import streamlit as st
 import requests
+import os
 from typing import Optional, Dict, Any, List
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.environ.get("STREAMLIT_API_URL", "http://localhost:8000")
+
+
+def get_api_base_url():
+    return API_BASE_URL
+
+
+def get_websocket_url():
+    base = API_BASE_URL
+    if base.startswith("http://"):
+        return base.replace("http://", "ws://") + "/api/ws"
+    elif base.startswith("https://"):
+        return base.replace("https://", "wss://") + "/api/ws"
+    return f"ws://{base}/api/ws"
 
 
 def get_token():
@@ -38,7 +52,11 @@ class APIService:
             data = response.json()
             set_token(data["access_token"])
             return data
-        raise Exception(response.json().get("detail", "Login failed"))
+        try:
+            error_detail = response.json().get("detail", "Login failed")
+        except Exception:
+            error_detail = f"Login failed (status: {response.status_code})"
+        raise Exception(error_detail)
     
     def signup_candidate(self, name: str, email: str, password: str, phone: Optional[str] = None) -> Dict[str, Any]:
         response = requests.post(
@@ -166,6 +184,15 @@ class APIService:
         if response.status_code == 200:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to get AI response"))
+
+    def get_evaluation_report(self, job_id: int, candidate_id: int) -> Dict[str, Any]:
+        response = requests.get(
+            f"{self.base_url}/evaluations/job/{job_id}/candidate/{candidate_id}",
+            headers=self._get_headers()
+        )
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Evaluation report not found"))
 
 
 api = APIService()

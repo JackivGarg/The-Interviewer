@@ -51,6 +51,11 @@ try:
                         st.markdown("**Additional Info:**")
                         st.write(app['additional_info'])
                     
+                    if st.button("View AI Evaluation Report", key=f"eval_{app['id']}"):
+                        st.session_state["eval_job_id"] = job_id
+                        st.session_state["eval_candidate_id"] = app['candidate_id']
+                        st.switch_page("pages/evaluation_report.py")
+                    
     else:
         st.error(f"Error: {response.json().get('detail', 'Failed to fetch applications')}")
 

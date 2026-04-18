@@ -39,9 +39,7 @@ if job.get('additional_requirements'):
     st.markdown("### Additional Requirements")
     st.write(job['additional_requirements'])
 
-if job.get('questions_to_ask'):
-    st.markdown("### Questions to Ask")
-    st.write(job['questions_to_ask'])
+# Questions to ask should not be visible to the candidate
 
 if job.get('more_info'):
     st.markdown("### More Information")
@@ -77,6 +75,8 @@ with st.form("application_form"):
         height=100
     )
     
+    resume_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+    
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
@@ -91,12 +91,28 @@ if submitted:
     if not skills:
         st.error("Please enter your skills")
     else:
+        parsed_resume_text = ""
+        if resume_file is not None:
+            try:
+                import pdfplumber
+                with pdfplumber.open(resume_file) as pdf:
+                    for page in pdf.pages:
+                        extracted = page.extract_text()
+                        if extracted:
+                            parsed_resume_text += extracted + "\n"
+            except Exception as e:
+                st.warning(f"Could not parse resume PDF: {e}")
+        
+        combined_info = additional_info
+        if parsed_resume_text:
+            combined_info = f"{additional_info}\n\n--- RESUME TEXT ---\n{parsed_resume_text}" if additional_info else f"--- RESUME TEXT ---\n{parsed_resume_text}"
+
         application_data = {
             "job_posting_id": job_id,
             "years_of_experience": years_of_experience,
             "skills": skills,
             "university": university if university else None,
-            "additional_info": additional_info if additional_info else None
+            "additional_info": combined_info if combined_info else None
         }
         
         try:

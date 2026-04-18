@@ -134,3 +134,10 @@ class ApplicationWithJobResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CEOProfileUpdate(BaseModel):
+    name: str
+    email: str
+    password: Optional[str] = None
+

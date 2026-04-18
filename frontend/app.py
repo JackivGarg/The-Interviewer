@@ -43,6 +43,11 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.role = None
     st.session_state.token = None
+    st.session_state.selected_job_id = None
+    st.session_state.view_job_id = None
+    st.session_state.eval_job_id = None
+    st.session_state.eval_candidate_id = None
+    st.session_state.ceo_view = None
     clear_token()
     st.rerun()
 
@@ -156,10 +161,10 @@ def hr_dashboard():
             st.switch_page("pages/hr_view_jobs.py")
     
     st.markdown("---")
-    st.markdown("### All Available Jobs")
+    st.markdown("### My Posted Jobs")
     
     try:
-        jobs = api.get_all_jobs()
+        jobs = api.get_hr_jobs()
         if jobs:
             for job in jobs:
                 with st.expander(f"📋 {job['title']}"):
@@ -196,6 +201,7 @@ def candidate_dashboard():
                 with st.expander(f"📋 {job['title']}"):
                     st.write(f"**Description:** {job['description']}")
                     st.write(f"**Experience Required:** {job['experience_required']} years")
+                    st.write(f"**Skills Required:** {job.get('skills_required', 'N/A')}")
                     if st.button(f"Apply Now", key=f"apply_{job['id']}"):
                         st.session_state.selected_job_id = job['id']
                         st.switch_page("pages/candidate_apply.py")
@@ -355,7 +361,7 @@ def main():
             hr_dashboard()
         elif st.session_state.role == "candidate":
             candidate_dashboard()
-        elif st.session_state.role in ["ceo", "coo", "cto"]:
+        elif st.session_state.role in ["ceo", "coo", "cto", "cfo", "cmo", "other"]:
             ceo_dashboard()
         else:
             st.error("Unknown role")

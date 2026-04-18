@@ -2,24 +2,23 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, Security, W
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+import os
 from backend.database import engine, Base, SessionLocal
 from backend.models import SeniorExecutive, HR, Candidate, JobPosting, CandidateApplication
 from backend.schemas import (
     HRCreate, HRResponse, CandidateCreate, CandidateResponse,
     LoginRequest, TokenResponse, JobPostingCreate, JobPostingResponse,
     JobPostingListResponse, CandidateApplicationCreate, CandidateApplicationResponse,
-    ApplicationWithJobResponse, SeniorExecutiveCreate, SeniorExecutiveResponse
+    ApplicationWithJobResponse, SeniorExecutiveCreate, SeniorExecutiveResponse,
+    CEOProfileUpdate
 )
 from backend.auth import (
     verify_password, get_password_hash, create_access_token,
-    decode_token
+    decode_token, pwd_context
 )
 from backend.voice_service import voice_service
 from backend.services.voice_handler import handle_voice_session
-from passlib.context import CryptContext
-from typing import List, Dict
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from typing import List, Dict, Any, Optional
 
 app = FastAPI(title="The Interviewer - Backend API")
 
@@ -52,7 +51,7 @@ def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    if role in ["ceo", "coo", "cto"]:
+    if role in ["ceo", "coo", "cto", "cfo", "cmo", "other"]:
         user = db.query(SeniorExecutive).filter(SeniorExecutive.email == email).first()
     elif role == "hr":
         user = db.query(HR).filter(HR.email == email).first()
@@ -67,6 +66,9 @@ def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends
 
 
 Base.metadata.create_all(bind=engine)
+
+os.makedirs("backend/evaluations", exist_ok=True)
+
 db = SessionLocal()
 try:
     existing_ceo = db.query(SeniorExecutive).filter(SeniorExecutive.is_ceo == "yes").first()
@@ -304,19 +306,19 @@ def get_ceo_profile(db: Session = Depends(get_db), current_user = Depends(get_cu
 
 
 @app.put("/ceo/profile")
-def update_ceo_profile(name: str, email: str, password: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def update_ceo_profile(payload: CEOProfileUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     user, role = current_user
     if role != "ceo":
         raise HTTPException(status_code=403, detail="Only CEO can update profile")
     
-    existing = db.query(SeniorExecutive).filter(SeniorExecutive.email == email, SeniorExecutive.id != user.id).first()
+    existing = db.query(SeniorExecutive).filter(SeniorExecutive.email == payload.email, SeniorExecutive.id != user.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already in use")
     
-    user.name = name
-    user.email = email
-    if password:
-        user.password = get_password_hash(password)
+    user.name = payload.name
+    user.email = payload.email
+    if payload.password and payload.password.strip():
+        user.password = get_password_hash(payload.password)
     
     db.commit()
     db.refresh(user)
@@ -411,7 +413,7 @@ async def websocket_interview(websocket: WebSocket, job_id: int):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
         
-    db = next(get_db())
+    db = SessionLocal()
     try:
         payload = decode_token(token)
         email = payload.get("sub")
@@ -431,16 +433,24 @@ async def websocket_interview(websocket: WebSocket, job_id: int):
             return
             
         job_details = {
+            "job_id": job_id,
             "title": job.title,
             "description": job.description,
             "skills_required": job.skills_required,
             "questions_to_ask": job.questions_to_ask
         }
         
+        application = db.query(CandidateApplication).filter(
+            CandidateApplication.candidate_id == candidate.id,
+            CandidateApplication.job_posting_id == job_id
+        ).first()
+        
         candidate_details = {
+            "candidate_id": candidate.id,
             "name": candidate.name,
             "experience": candidate.experience,
-            "skills": candidate.skills
+            "skills": candidate.skills,
+            "additional_info": application.additional_info if application else ""
         }
         
         await handle_voice_session(websocket, job_details, candidate_details)
@@ -451,8 +461,43 @@ async def websocket_interview(websocket: WebSocket, job_id: int):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         except Exception:
             pass
+    finally:
+        db.close()
+
+@app.get("/evaluations/job/{job_id}/candidate/{candidate_id}")
+def get_evaluation_report(
+    job_id: int,
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    import os, json
+    user, role = current_user
+    if role not in ["hr", "ceo"]:
+        raise HTTPException(status_code=403, detail="Only HR or CEO can view evaluation reports")
+        
+    eval_path = f"backend/evaluations/job_{job_id}_candidate_{candidate_id}.json"
+    if not os.path.exists(eval_path):
+        raise HTTPException(status_code=404, detail="Evaluation report not found. The candidate may not have completed the interview yet.")
+        
+    with open(eval_path, "r") as f:
+        report = json.load(f)
+    return report
+
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # ROOT CAUSE FIX: websockets v16 removed ping_interval from legacy server,
+    # so uvicorn 0.27's ws_ping_interval=None is silently ignored and websockets
+    # applies its own default 20s ping that kills long-running sessions.
+    #
+    # Solution: use wsproto backend — it has ZERO built-in ping mechanism.
+    # Our application-level keepalive in voice_handler.py handles liveness.
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        ws="wsproto",
+        log_level="info",
+    )

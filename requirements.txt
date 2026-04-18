@@ -5,8 +5,14 @@ passlib==1.7.4
 bcrypt==4.1.2
 python-jose==3.3.0
 python-multipart==0.0.6
-pydantic==2.5.3
+python-dotenv==1.0.0
+pydantic==2.12.5
 streamlit==1.30.0
 requests==2.31.0
-google-generativeai
+google-genai
 faster-whisper
+pdfplumber
+email-validator
+edge-tts
+numpy
+wsproto

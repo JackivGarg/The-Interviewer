@@ -48,6 +48,11 @@ try:
                     if app.get('additional_info'):
                         st.markdown("**Additional Info:**")
                         st.write(app['additional_info'])
+                    
+                    st.markdown("---")
+                    if st.button(f"🎙️ Start Interview", key=f"interview_{app['id']}"):
+                        st.session_state.selected_job_id = app['job_posting_id']
+                        st.switch_page("pages/candidate_interview.py")
 
 except Exception as e:
     st.error(f"Error fetching applications: {str(e)}")
