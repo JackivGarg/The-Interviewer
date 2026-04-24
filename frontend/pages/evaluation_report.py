@@ -25,38 +25,45 @@ st.title("📊 AI Interview Evaluation Report")
 
 try:
     report = api.get_evaluation_report(job_id, candidate_id)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(label="Technical Score", value=f"{report.get('technical_score', 0)}/10")
-    with col2:
-        st.metric(label="Behavioral Score", value=f"{report.get('behavioral_score', 0)}/10")
-    with col3:
-        st.metric(label="Confidence Score", value=f"{report.get('confidence_score', 0)}/10")
-        
-    st.markdown("### 📝 Summary")
-    st.info(report.get('summary', 'No summary provided.'))
-    
-    col_str, col_weak = st.columns(2)
-    with col_str:
-        st.markdown("### 💪 Strengths")
-        for s in report.get('strengths', []):
-            st.markdown(f"- {s}")
-            
-    with col_weak:
-        st.markdown("### ⚠️ Areas for Improvement")
-        for w in report.get('weaknesses', []):
-            st.markdown(f"- {w}")
-            
-    st.markdown("---")
-    verdict = report.get('verdict', 'Unknown')
-    if "Strong Hire" in verdict:
-        st.success(f"### Final Verdict: {verdict}")
-    elif "No Hire" in verdict:
-        st.error(f"### Final Verdict: {verdict}")
+    verdict = report.get("verdict", "Unknown")
+
+    # Handle failed evaluation explicitly before showing any metrics
+    if verdict == "Error":
+        st.error("⚠️ Evaluation Failed")
+        st.warning(report.get("summary", "The evaluation could not be completed due to a technical error."))
+        st.info("**Possible causes:** The interview session was too short, or the AI evaluation service encountered an error. "
+                "Ask the candidate to re-interview to generate a fresh report.")
     else:
-        st.warning(f"### Final Verdict: {verdict}")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(label="Technical Score", value=f"{report.get('technical_score', 0)}/10")
+        with col2:
+            st.metric(label="Behavioral Score", value=f"{report.get('behavioral_score', 0)}/10")
+        with col3:
+            st.metric(label="Confidence Score", value=f"{report.get('confidence_score', 0)}/10")
+
+        st.markdown("### 📝 Summary")
+        st.info(report.get("summary", "No summary provided."))
+
+        col_str, col_weak = st.columns(2)
+        with col_str:
+            st.markdown("### 💪 Strengths")
+            for s in report.get("strengths", []):
+                st.markdown(f"- {s}")
+
+        with col_weak:
+            st.markdown("### ⚠️ Areas for Improvement")
+            for w in report.get("weaknesses", []):
+                st.markdown(f"- {w}")
+
+        st.markdown("---")
+        if "Strong Hire" in verdict:
+            st.success(f"### 🏆 Final Verdict: {verdict}")
+        elif "No Hire" in verdict:
+            st.error(f"### ❌ Final Verdict: {verdict}")
+        else:
+            st.warning(f"### ✅ Final Verdict: {verdict}")
 
 except Exception as e:
     st.error(f"Could not load evaluation report: {str(e)}")

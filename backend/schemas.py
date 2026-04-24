@@ -96,6 +96,7 @@ class JobPostingListResponse(BaseModel):
     title: str
     description: str
     experience_required: int
+    skills_required: str
 
     class Config:
         from_attributes = True
@@ -141,3 +142,6 @@ class CEOProfileUpdate(BaseModel):
     email: str
     password: Optional[str] = None
 
+
+class ApplicationStatusUpdate(BaseModel):
+    status: str

@@ -212,6 +212,10 @@ def candidate_dashboard():
 
 
 def ceo_dashboard():
+    # Set default view before any rendering so first load shows HR tab
+    if "ceo_view" not in st.session_state:
+        st.session_state.ceo_view = "hr"
+
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         st.markdown('<h2 class="header-gradient">🏢 Executive Dashboard</h2>', unsafe_allow_html=True)
@@ -244,9 +248,6 @@ def ceo_dashboard():
             st.rerun()
     
     st.markdown("---")
-    
-    if "ceo_view" not in st.session_state:
-        st.session_state.ceo_view = "hr"
     
     if st.session_state.ceo_view == "settings":
         st.markdown("### ⚙️ CEO Settings")

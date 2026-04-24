@@ -157,6 +157,12 @@ html_code = f"""
         let aiIsSpeaking = false;
         let currentAudio = null; // The playing HTMLAudioElement
 
+        // Reconnect state
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT = 3;
+        let userEndedSession = false;   // set true when user clicks "End Interview"
+        let interviewCompleted = false; // set true when server sends interview_complete
+
         const btn        = document.getElementById("mic-btn");
         const statusIcon = document.getElementById("status-icon");
         const statusText = document.getElementById("status-text");
@@ -309,6 +315,7 @@ html_code = f"""
                     dbg("Interview completed by AI.");
                     setStatus("🏁", msg.message || "Interview complete!", "COMPLETED", "#15803d");
                     // Gracefully end session
+                    interviewCompleted = true;
                     isSessionActive = false;
                     aiIsSpeaking = false;
                     teardownMicrophone();
@@ -321,17 +328,47 @@ html_code = f"""
 
             ws.onclose = (e) => {{
                 dbg(`WebSocket closed. Code: ${{e.code}}, Reason: ${{e.reason}}`);
-                setStatus("🔌", "Disconnected.", "ENDED", "#555");
+
+                // Don't reconnect if the user ended it or interview finished normally
+                if (userEndedSession || interviewCompleted) {{
+                    setStatus("🏁", "Session ended.", "ENDED", "#555");
+                    teardownMicrophone();
+                    isSessionActive = false;
+                    btn.innerText = "🎙️ Start Interview";
+                    btn.classList.remove("active");
+                    btn.disabled = false;
+                    return;
+                }}
+
+                // Unexpected disconnect — try to reconnect with backoff
                 teardownMicrophone();
                 isSessionActive = false;
-                btn.innerText = "🎙️ Start Interview";
-                btn.classList.remove("active");
-                btn.disabled = false;
+
+                if (reconnectAttempts < MAX_RECONNECT) {{
+                    reconnectAttempts++;
+                    const waitSec = reconnectAttempts * 2;  // 2s, 4s, 6s
+                    setStatus("🔄", `Reconnecting... (attempt ${{reconnectAttempts}}/${{MAX_RECONNECT}}) — waiting ${{waitSec}}s`, "RECONNECTING", "#78350f");
+                    dbg(`Scheduling reconnect attempt ${{reconnectAttempts}} in ${{waitSec}}s...`);
+                    setTimeout(async () => {{
+                        dbg(`Reconnect attempt ${{reconnectAttempts}}: requesting mic...`);
+                        const micReady = await requestMicPermission();
+                        if (micReady) {{
+                            setStatus("📡", "Reconnecting to server...", "CONNECTING", "#1d4ed8");
+                            initWebSocket();
+                        }}
+                    }}, waitSec * 1000);
+                }} else {{
+                    dbg("Max reconnect attempts reached. Giving up.");
+                    setStatus("❌", "Connection lost. Please refresh and start over.", "DISCONNECTED", "#b91c1c");
+                    btn.innerText = "🎙️ Start Interview";
+                    btn.classList.remove("active");
+                    btn.disabled = false;
+                }}
             }};
 
             ws.onerror = (e) => {{
                 dbg("WebSocket error occurred.");
-                setStatus("❌", "Connection error. Retry.", "ERROR", "#b91c1c");
+                setStatus("❌", "Connection error.", "ERROR", "#b91c1c");
             }};
         }}
 
@@ -431,6 +468,7 @@ html_code = f"""
                 }}
             }} else {{
                 dbg("User ended interview.");
+                userEndedSession = true;  // Prevent reconnect on expected close
                 if (ws) ws.close();
                 teardownMicrophone();
                 isSessionActive = false;

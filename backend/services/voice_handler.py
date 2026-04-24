@@ -351,14 +351,15 @@ class VoiceConnectionManager:
                         job_id = job_details.get("job_id", 0)
                         candidate_id = candidate_details.get("candidate_id", 0)
                         if job_id and candidate_id:
-                            os.makedirs("backend/evaluations", exist_ok=True)
-                            eval_path = f"backend/evaluations/job_{job_id}_candidate_{candidate_id}.json"
+                            EVAL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "evaluations")
+                            os.makedirs(EVAL_DIR, exist_ok=True)
+                            eval_path = os.path.join(EVAL_DIR, f"job_{job_id}_candidate_{candidate_id}.json")
                             with open(eval_path, "w") as f:
                                 json.dump(report, f, indent=4)
                             print(f"[VOICE] Evaluation saved: {eval_path}")
                     except Exception as ex:
                         print(f"[VOICE] Eval error: {ex}")
-                threading.Thread(target=run_eval, daemon=True).start()
+                threading.Thread(target=run_eval, daemon=False).start()
 
     def _transcribe(self, audio_bytes: bytes) -> str:
         """Convert raw PCM bytes → WAV → Whisper transcription."""

@@ -75,8 +75,6 @@ if submitted:
     if not title or not description or not skills_required:
         st.error("Please fill in all required fields (Title, Description, Skills Required)")
     else:
-        skills_list = [s.strip() for s in skills_required.split(",") if s.strip()]
-        
         job_data = {
             "title": title,
             "description": description,

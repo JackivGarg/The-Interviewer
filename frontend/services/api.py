@@ -194,5 +194,15 @@ class APIService:
             return response.json()
         raise Exception(response.json().get("detail", "Evaluation report not found"))
 
+    def update_application_status(self, job_id: int, app_id: int, status: str) -> Dict[str, Any]:
+        response = requests.patch(
+            f"{self.base_url}/hr/jobs/{job_id}/applications/{app_id}/status",
+            json={"status": status},
+            headers=self._get_headers()
+        )
+        if response.status_code == 200:
+            return response.json()
+        raise Exception(response.json().get("detail", "Failed to update status"))
+
 
 api = APIService()
