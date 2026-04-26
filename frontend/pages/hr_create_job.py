@@ -61,6 +61,44 @@ with st.form("job_form"):
         height=80
     )
     
+    # ── Interview Topics with Per-Topic Thresholds ─────────────────────
+    st.markdown("---")
+    st.markdown("### 🎯 Interview Topics")
+    st.caption(
+        "Define the topics the AI interviewer should cover. "
+        "Set a **threshold** for each topic (1 = lenient, 10 = very strict). "
+        "If the candidate scores below the threshold, the AI will ask follow-up questions (max 3 per topic)."
+    )
+
+    num_topics = st.number_input(
+        "Number of interview topics",
+        min_value=1,
+        max_value=10,
+        value=4,
+        help="How many topics should the AI interviewer cover?"
+    )
+
+    topics_list = []
+    for i in range(int(num_topics)):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            topic_name = st.text_input(
+                f"Topic {i + 1}",
+                placeholder=f"e.g., Python Fundamentals, System Design, Behavioral...",
+                key=f"topic_{i}"
+            )
+        with col2:
+            threshold = st.slider(
+                f"Threshold",
+                min_value=1,
+                max_value=10,
+                value=6,
+                key=f"thresh_{i}",
+                help="Score needed to pass (6 = standard, 7-8 = strict)"
+            )
+        if topic_name and topic_name.strip():
+            topics_list.append({"topic": topic_name.strip(), "threshold": threshold})
+
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
@@ -74,6 +112,8 @@ with st.form("job_form"):
 if submitted:
     if not title or not description or not skills_required:
         st.error("Please fill in all required fields (Title, Description, Skills Required)")
+    elif not topics_list:
+        st.error("Please define at least one interview topic.")
     else:
         job_data = {
             "title": title,
@@ -82,13 +122,14 @@ if submitted:
             "skills_required": skills_required,
             "additional_requirements": additional_requirements if additional_requirements else None,
             "questions_to_ask": questions_to_ask if questions_to_ask else None,
-            "more_info": more_info if more_info else None
+            "more_info": more_info if more_info else None,
+            "interview_topics": topics_list,
         }
         
         try:
             result = api.create_job(job_data)
             st.success(f"✅ Job posting created successfully! (ID: {result['id']})")
-            st.info("Redirecting to HR Dashboard...")
+            st.info(f"📋 {len(topics_list)} interview topics configured.")
             st.switch_page("app.py")
         except Exception as e:
             st.error(f"Failed to create job: {str(e)}")

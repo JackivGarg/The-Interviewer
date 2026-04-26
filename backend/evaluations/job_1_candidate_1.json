@@ -1,9 +1,41 @@
 {
-    "technical_score": 0,
-    "behavioral_score": 0,
-    "confidence_score": 0,
-    "summary": "Evaluation failed due to a technical error.",
-    "strengths": [],
-    "weaknesses": [],
-    "verdict": "Error"
+    "candidate_name": "Aman",
+    "job_title": "AI Interview Agent",
+    "evaluation": {
+        "technical_skills": {
+            "python_fundamentals": {
+                "score": 2,
+                "feedback": "Candidate's responses were vague, off-topic, and lacked concrete examples or syntax for exception handling (e.g., FileNotFoundError). Demonstrated minimal understanding of Python fundamentals."
+            },
+            "langgraph": {
+                "score": 3,
+                "feedback": "Candidate provided a superficial explanation of LangGraph workflow design but failed to address state management or HR chatbot specifics. Misunderstood basic HR terminology ('HR' stands for Human Resources)."
+            },
+            "langchain": {
+                "score": 3,
+                "feedback": "Responses were vague and lacked technical details on integrating LangChain with FastAPI for HR document summarization. No mention of API configuration, payload formatting, or error handling."
+            },
+            "websockets": {
+                "score": 4,
+                "feedback": "Candidate used an analogy but failed to explain technical differences between Websockets and REST API or their implications for real-time HR feedback systems."
+            }
+        },
+        "soft_skills": {
+            "collaboration": {
+                "score": 4,
+                "feedback": "Candidate did not demonstrate cross-team collaboration strategies, though no direct evidence of poor teamwork was observed."
+            },
+            "documentation": {
+                "score": 2,
+                "feedback": "Responses lacked structured, detailed explanations, suggesting poor organizational and documentation skills."
+            },
+            "attention_to_detail": {
+                "score": 2,
+                "feedback": "Answers were inconsistent and error-prone (e.g., misunderstanding 'HR' acronym)."
+            }
+        }
+    },
+    "overall_score": 3,
+    "recommendation": "Reject",
+    "reasoning": "Candidate failed to demonstrate required technical proficiency in Python, LangGraph, LangChain, and Websockets. Lacks foundational understanding of AI tools and HR-specific terminology. Soft skills (documentation, attention to detail) are also insufficient for the role."
 }

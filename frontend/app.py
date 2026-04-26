@@ -7,29 +7,10 @@ from frontend.services.api import api, clear_token
 
 st.set_page_config(page_title="The Interviewer", page_icon="💼", layout="centered")
 
-st.markdown("""
-<style>
-    [data-testid="stSidebar"] {
-        display: none;
-    }
-    .stButton > button {
-        width: 100%;
-        border-radius: 8px;
-        padding: 10px;
-    }
-    .dashboard-card {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .header-gradient {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Load CSS from static file
+_css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "style.css")
+with open(_css_path) as _f:
+    st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -53,41 +34,7 @@ def logout():
 
 
 def login_page():
-    st.markdown("""
-    <style>
-    .login-container {
-        max-width: 400px;
-        margin: 0 auto;
-        padding: 40px 30px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-    .login-title {
-        text-align: center;
-        color: white;
-        font-size: 36px;
-        font-weight: bold;
-        margin-bottom: 10px;
-    }
-    .login-subtitle {
-        text-align: center;
-        color: rgba(255,255,255,0.9);
-        font-size: 16px;
-        margin-bottom: 30px;
-    }
-    .stTextInput > div > div > input {
-        border-radius: 10px;
-        padding: 12px;
-    }
-    .stButton > button {
-        width: 100%;
-        border-radius: 10px;
-        padding: 12px;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+
     
     st.markdown('<div class="login-title">💼 The Interviewer</div>', unsafe_allow_html=True)
     st.markdown('<div class="login-subtitle">Smart Recruitment Platform</div>', unsafe_allow_html=True)

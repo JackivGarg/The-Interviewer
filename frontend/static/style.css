@@ -1,0 +1,65 @@
+/* ── The Interviewer — Global Styles ────────────────────────── */
+
+/* Hide Streamlit sidebar */
+[data-testid="stSidebar"] {
+    display: none;
+}
+
+/* Buttons */
+.stButton > button {
+    width: 100%;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+/* Dashboard cards */
+.dashboard-card {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Header gradient text */
+.header-gradient {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Login page */
+.login-container {
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 40px 30px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.login-title {
+    text-align: center;
+    color: white;
+    font-size: 36px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.login-subtitle {
+    text-align: center;
+    color: rgba(255,255,255,0.9);
+    font-size: 16px;
+    margin-bottom: 30px;
+}
+
+/* Login form inputs */
+.login-container .stTextInput > div > div > input {
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.login-container .stButton > button {
+    border-radius: 10px;
+    padding: 12px;
+    font-weight: bold;
+}

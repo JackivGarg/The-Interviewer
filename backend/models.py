@@ -51,6 +51,7 @@ class JobPosting(Base):
     additional_requirements = Column(Text, nullable=True)
     questions_to_ask = Column(Text, nullable=True)
     more_info = Column(Text, nullable=True)
+    interview_topics = Column(Text, nullable=True)  # JSON: [{"topic": "X", "threshold": 7}, ...]
     
     hr = relationship("HR", back_populates="job_postings")
     applications = relationship("CandidateApplication", back_populates="job_posting")
@@ -66,6 +67,7 @@ class CandidateApplication(Base):
     skills = Column(Text, nullable=False)
     university = Column(String, nullable=True)
     additional_info = Column(Text, nullable=True)
+    resume_path = Column(String, nullable=True)
     status = Column(String, default="pending")
 
     job_posting = relationship("JobPosting", back_populates="applications")

@@ -66,6 +66,11 @@ class TokenResponse(BaseModel):
     role: str
 
 
+class InterviewTopicInput(BaseModel):
+    topic: str
+    threshold: int  # 1-10, score needed to pass this topic
+
+
 class JobPostingCreate(BaseModel):
     title: str
     description: str
@@ -74,6 +79,7 @@ class JobPostingCreate(BaseModel):
     additional_requirements: Optional[str] = None
     questions_to_ask: Optional[str] = None
     more_info: Optional[str] = None
+    interview_topics: Optional[List[InterviewTopicInput]] = None
 
 
 class JobPostingResponse(BaseModel):
@@ -86,6 +92,7 @@ class JobPostingResponse(BaseModel):
     additional_requirements: Optional[str] = None
     questions_to_ask: Optional[str] = None
     more_info: Optional[str] = None
+    interview_topics: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -97,6 +104,7 @@ class JobPostingListResponse(BaseModel):
     description: str
     experience_required: int
     skills_required: str
+    interview_topics: Optional[str] = None
 
     class Config:
         from_attributes = True

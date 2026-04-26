@@ -123,7 +123,7 @@ class APIService:
         raise Exception(response.json().get("detail", "Failed to fetch HR"))
     
     def get_all_candidates(self) -> List[Dict[str, Any]]:
-        response = requests.get(f"{self.base_url}/ceo/candidates", headers=self._get_headers())
+        response = requests.get(f"{self.base_url}/candidates", headers=self._get_headers())
         if response.status_code == 200:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to fetch candidates"))
@@ -175,15 +175,7 @@ class APIService:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to create HR"))
 
-    def interview_chat(self, job_id: int, history: List[Dict[str, str]]) -> Dict[str, Any]:
-        response = requests.post(
-            f"{self.base_url}/api/interview/chat",
-            json={"job_id": job_id, "history": history},
-            headers=self._get_headers()
-        )
-        if response.status_code == 200:
-            return response.json()
-        raise Exception(response.json().get("detail", "Failed to get AI response"))
+
 
     def get_evaluation_report(self, job_id: int, candidate_id: int) -> Dict[str, Any]:
         response = requests.get(
@@ -203,6 +195,29 @@ class APIService:
         if response.status_code == 200:
             return response.json()
         raise Exception(response.json().get("detail", "Failed to update status"))
+
+    def prepare_interview(self, file_bytes: bytes, filename: str, job_id: int) -> Dict[str, Any]:
+        """Upload resume PDF and generate question file for the interview."""
+        files = {"file": (filename, file_bytes, "application/pdf")}
+        data = {"job_id": str(job_id)}
+        # Don't send Content-Type header — let requests set multipart boundary
+        headers = {}
+        token = get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        response = requests.post(
+            f"{self.base_url}/api/interview/prepare",
+            files=files,
+            data=data,
+            headers=headers,
+        )
+        if response.status_code == 200:
+            return response.json()
+        try:
+            detail = response.json().get("detail", "Failed to prepare interview")
+        except Exception:
+            detail = f"Preparation failed (status: {response.status_code})"
+        raise Exception(detail)
 
 
 api = APIService()

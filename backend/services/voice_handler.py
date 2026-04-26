@@ -1,3 +1,18 @@
+"""
+voice_handler.py — WebSocket session handler for live voice interviews.
+
+This module handles:
+  - VAD (Voice Activity Detection) via energy thresholding
+  - Whisper STT (speech-to-text)
+  - LangGraph interview graph invocation (replaces old voice_service)
+  - edge-tts TTS (text-to-speech)
+  - WebSocket keepalive heartbeat
+  - Per-turn error recovery
+
+The LangGraph graph is invoked once per turn with the user's transcribed
+answer. It returns the AI's response text, routing decision, and score.
+"""
+
 import asyncio
 import base64
 import json
@@ -5,16 +20,20 @@ import numpy as np
 import io
 import wave
 import time
+import logging
 from typing import Optional
 from fastapi import WebSocket, WebSocketDisconnect
 from faster_whisper import WhisperModel
 import edge_tts
-from backend.voice_service import voice_service
+from backend.graph.graph import interview_graph
 from backend.services.evaluation_service import evaluation_service
 import os
 
+logger = logging.getLogger("interviewer.voice")
+
 # Load Whisper model globally to avoid reloading
 whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+logger.info(f"[Voice] Whisper model loaded: tiny.en (cpu, int8)")
 
 # Energy threshold for VAD
 # Int16 range is 0-32767. Fan noise is typically 200-800 RMS.
@@ -59,17 +78,30 @@ async def _keepalive_loop(websocket: WebSocket, stop_event: asyncio.Event, lock:
         try:
             async with lock:
                 await websocket.send_text(json.dumps({"type": "ping"}))
-            print("[VOICE] Keepalive ping sent.")
+            logger.debug("[Voice] Keepalive ping sent.")
         except Exception:
-            print("[VOICE] Keepalive: WebSocket already closed, stopping heartbeat.")
+            logger.warning("[Voice] Keepalive: WebSocket already closed, stopping heartbeat.")
             break
 
 
 class VoiceConnectionManager:
 
-    async def handle_session(self, websocket: WebSocket, job_details: dict, candidate_details: dict):
+    async def handle_session(
+        self,
+        websocket: WebSocket,
+        job_details: dict,
+        candidate_details: dict,
+        resume_profile: dict,
+        question_file: dict,
+    ):
         await websocket.accept()
-        print(f"[VOICE] Session started | candidate={candidate_details.get('name')} | job={job_details.get('title')}")
+        candidate_name = candidate_details.get('name', 'Candidate')
+        job_title = job_details.get('title', 'the position')
+        logger.info(f"[Voice] ═══════════════════════════════════════════════")
+        logger.info(f"[Voice] Session started | candidate={candidate_name} | job={job_title}")
+        logger.info(f"[Voice]   VAD threshold={ENERGY_THRESHOLD} | silence_frames={SILENCE_THRESHOLD} | keepalive={KEEPALIVE_INTERVAL}s")
+        logger.info(f"[Voice]   Topics: {len(question_file.get('topics', []))} | Resume skills: {len(resume_profile.get('skills', []))}")
+        logger.info(f"[Voice] ═══════════════════════════════════════════════")
 
         # ── Session State ─────────────────────────────────────────
         audio_buffer = bytearray()
@@ -83,8 +115,12 @@ class VoiceConnectionManager:
         ai_speak_start_time = 0.0
         ai_speak_expected_duration = 0.0
 
-        # Conversation history for LLM
-        history = []
+        # LangGraph thread ID — MUST be unique per session to avoid state leaks
+        # Using timestamp ensures each new interview session starts with a clean state
+        session_ts = int(time.time() * 1000)
+        thread_id = f"interview_{job_details.get('job_id', 0)}_{candidate_details.get('candidate_id', 0)}_{session_ts}"
+        graph_config = {"configurable": {"thread_id": thread_id}}
+        logger.info(f"[Voice] LangGraph thread_id={thread_id}")
 
         # Lock for synchronizing WebSocket sends between main loop and keepalive heartbeat
         ws_lock = asyncio.Lock()
@@ -95,16 +131,56 @@ class VoiceConnectionManager:
         # Start the concurrent keepalive heartbeat
         keepalive_task = asyncio.create_task(_keepalive_loop(websocket, stop_keepalive, ws_lock))
 
+        # Track the final graph state for evaluation
+        final_graph_state = None
+
         try:
-            # ── Initial Greeting ──────────────────────────────────
-            greeting = "Hello! Welcome to your interview. I'll be your interviewer today. Let's get started — could you please introduce yourself briefly?"
-            history.append({"role": "model", "parts": [greeting]})
-            print("[VOICE] Sending greeting...")
+            # ── Initial Greeting via LangGraph ────────────────────
+            logger.info("[Voice] Invoking graph for greeting (empty messages)...")
             await _send(websocket, {
                 "type": "status",
-                "message": "🤖 AI Interviewer is preparing...",
+                "message": "AI Interviewer is preparing...",
                 "state": "thinking"
             }, ws_lock)
+
+            t0 = time.time()
+            try:
+                greeting_result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        interview_graph.invoke,
+                        {
+                            "messages": [],
+                            "resume_profile": resume_profile,
+                            "question_file": question_file,
+                            "job_details": job_details,
+                            "candidate_name": candidate_name,
+                            "current_topic_index": 0,
+                            "current_topic_turn": 0,
+                            "current_topic_score": 0,
+                            "grader_reasoning": "",
+                            "planner_instruction": "",
+                            "is_complete": False,
+                            "evaluation_notes": [],
+                            "route": "",
+                        },
+                        graph_config,
+                    ),
+                    timeout=45.0,
+                )
+                final_graph_state = greeting_result
+                greeting = greeting_result["messages"][-1]["content"]
+                elapsed = round(time.time() - t0, 2)
+                logger.info(f"[Voice] Greeting generated in {elapsed}s: '{greeting[:80]}...'")
+
+            except asyncio.TimeoutError:
+                logger.error("[Voice] Greeting generation timed out after 45s, using fallback.")
+                greeting = f"Hello {candidate_name}! Welcome to your interview for the {job_title} position. Let's get started -- could you please introduce yourself briefly?"
+            except Exception as e:
+                logger.error(f"[Voice] Greeting error: {type(e).__name__}: {e}")
+                greeting = f"Hello {candidate_name}! Welcome to your interview for the {job_title} position. Let's get started -- could you please introduce yourself briefly?"
+
+            await _send(websocket, {"type": "text", "role": "ai", "text": greeting}, ws_lock)
+
             ai_is_speaking = True
             ai_speak_start_time = time.time()
             ai_speak_expected_duration = len(greeting) / 10.0 + 5.0
@@ -129,21 +205,21 @@ class VoiceConnectionManager:
                         # Client finished playing the AI audio.
                         # NOW it's safe to re-enable the microphone listener.
                         ai_is_speaking = False
-                        print("[VOICE] Client confirmed audio_done. Listening enabled.")
+                        logger.debug("[Voice] Client confirmed audio_done. Listening enabled.")
                         await _send(websocket, {
                             "type": "status",
-                            "message": "🎙️ Your turn — please speak now",
+                            "message": "Your turn -- please speak now",
                             "state": "listening"
                         }, ws_lock)
 
                     elif msg_type == "interrupt":
                         # Barge-in: user spoke while AI was playing
                         ai_is_speaking = False
-                        print("[VOICE] Barge-in interrupt received.")
+                        logger.info("[Voice] Barge-in interrupt received.")
                         await _send(websocket, {"type": "clear"}, ws_lock)
                         await _send(websocket, {
                             "type": "status",
-                            "message": "🎙️ Listening...",
+                            "message": "Listening...",
                             "state": "listening"
                         }, ws_lock)
 
@@ -157,11 +233,11 @@ class VoiceConnectionManager:
                 elif "bytes" in message:
                     if ai_is_speaking:
                         if time.time() - ai_speak_start_time > ai_speak_expected_duration:
-                            print("[VOICE] Server-side fallback: audio_done timeout reached. Ungating mic.")
+                            logger.info("[Voice] Server-side fallback: audio_done timeout reached. Ungating mic.")
                             ai_is_speaking = False
                             await _send(websocket, {
                                 "type": "status",
-                                "message": "🎙️ Your turn — please speak now",
+                                "message": "Your turn -- please speak now",
                                 "state": "listening"
                             }, ws_lock)
                         else:
@@ -188,10 +264,10 @@ class VoiceConnectionManager:
                         if not is_speaking:
                             is_speaking = True
                             silence_frames = 0
-                            print(f"[VOICE] Speech start | rms={rms:.0f} | ambient={ambient_energy:.0f} | threshold={dynamic_threshold:.0f}")
+                            logger.info(f"[Voice] Speech start | rms={rms:.0f} | ambient={ambient_energy:.0f} | threshold={dynamic_threshold:.0f}")
                             await _send(websocket, {
                                 "type": "status",
-                                "message": "🎧 Listening to you...",
+                                "message": "Listening to you...",
                                 "state": "listening"
                             }, ws_lock)
                         silence_frames = 0
@@ -208,11 +284,11 @@ class VoiceConnectionManager:
                             silence_frames = 0
                             final_audio = bytes(audio_buffer)
                             audio_buffer.clear()
-                            print(f"[VOICE] Utterance end | buffer={len(final_audio)} bytes")
+                            logger.info(f"[Voice] Utterance end | buffer={len(final_audio)} bytes")
 
                             await _send(websocket, {
                                 "type": "status",
-                                "message": "⏳ Transcribing your speech...",
+                                "message": "Transcribing your speech...",
                                 "state": "processing"
                             }, ws_lock)
 
@@ -221,80 +297,88 @@ class VoiceConnectionManager:
                             try:
                                 # Run Whisper in a thread (blocking, CPU-bound)
                                 # The keepalive task keeps the WS alive during this
-                                print("[VOICE] Starting transcription...")
+                                logger.info("[Voice] Starting transcription...")
+                                t_stt = time.time()
                                 transcription = await asyncio.to_thread(self._transcribe, final_audio)
-                                print(f"[VOICE] Transcription result: '{transcription}'")
+                                stt_elapsed = round(time.time() - t_stt, 2)
+                                logger.info(f"[Voice] Transcription ({stt_elapsed}s): '{transcription}'")
 
                                 if not transcription.strip():
-                                    print("[VOICE] Empty transcription (noise). Resuming listen.")
+                                    logger.info("[Voice] Empty transcription (noise). Resuming listen.")
                                     await _send(websocket, {
                                         "type": "status",
-                                        "message": "🎙️ Didn't catch that. Please speak again.",
+                                        "message": "Didn't catch that. Please speak again.",
                                         "state": "listening"
                                     }, ws_lock)
                                     continue
 
                                 # Send transcription to frontend chat
                                 await _send(websocket, {"type": "text", "role": "user", "text": transcription.strip()}, ws_lock)
-                                history.append({"role": "user", "parts": [transcription.strip()]})
 
                                 await _send(websocket, {
                                     "type": "status",
-                                    "message": "🤖 AI is thinking...",
+                                    "message": "AI is thinking...",
                                     "state": "thinking"
                                 }, ws_lock)
 
-                                # Run Gemini API in a thread (network I/O - can take 5-20s)
-                                # Wrapped in a 45s timeout to prevent indefinite stall.
-                                # The keepalive task keeps the WS alive during this.
-                                print("[VOICE] Sending to Gemini API...")
+                                # ── Invoke LangGraph Planner ──────────────────
+                                logger.info("[Voice] Invoking LangGraph planner...")
+                                t_llm = time.time()
                                 try:
-                                    ai_response = await asyncio.wait_for(
+                                    graph_result = await asyncio.wait_for(
                                         asyncio.to_thread(
-                                            voice_service.get_response,
-                                            history,
-                                            job_details,
-                                            candidate_details
+                                            interview_graph.invoke,
+                                            {"messages": [{"role": "user", "content": transcription.strip()}]},
+                                            graph_config,
                                         ),
-                                        timeout=45.0
+                                        timeout=45.0,
                                     )
+                                    final_graph_state = graph_result
                                 except asyncio.TimeoutError:
-                                    print("[VOICE] Gemini API timed out after 45s.")
+                                    logger.error("[Voice] LangGraph timed out after 45s.")
+                                    graph_result = None
+
+                                llm_elapsed = round(time.time() - t_llm, 2)
+
+                                if graph_result:
+                                    ai_response = graph_result["messages"][-1]["content"]
+                                    interview_ended = graph_result.get("is_complete", False)
+                                    route = graph_result.get("route", "unknown")
+                                    logger.info(
+                                        f"[Voice] Turn complete ({llm_elapsed}s) | route={route} | "
+                                        f"score={graph_result.get('current_topic_score', '?')} | "
+                                        f"topic_idx={graph_result.get('current_topic_index')} | "
+                                        f"topic_turn={graph_result.get('current_topic_turn')} | "
+                                        f"response='{ai_response[:80]}...'"
+                                    )
+                                else:
                                     ai_response = "I'm sorry, I took too long to process that. Could you repeat your answer?"
+                                    interview_ended = False
+                                    logger.warning("[Voice] Using fallback response due to timeout.")
 
                                 # Guard against None/empty response
                                 if not ai_response or not ai_response.strip():
-                                    print("[VOICE] AI response was empty, using fallback.")
+                                    logger.warning("[Voice] AI response was empty, using fallback.")
                                     ai_response = "Thank you for sharing that. Could you tell me more about your technical background?"
 
-                                print(f"[VOICE] Gemini response: '{ai_response[:100]}...'")
-
-                                # ── Check for end-of-interview signal ─────
-                                interview_ended = "[END_INTERVIEW]" in ai_response
-                                # Strip the marker so TTS doesn't read it aloud
-                                clean_response = ai_response.replace("[END_INTERVIEW]", "").strip()
-                                if not clean_response:
-                                    clean_response = "Thank you for your time. The interview is now complete. We'll be in touch!"
-
-                                history.append({"role": "model", "parts": [ai_response]})
-                                await _send(websocket, {"type": "text", "role": "ai", "text": clean_response}, ws_lock)
+                                await _send(websocket, {"type": "text", "role": "ai", "text": ai_response}, ws_lock)
 
                                 # Gate mic before sending audio
                                 ai_is_speaking = True
                                 ai_speak_start_time = time.time()
-                                ai_speak_expected_duration = len(clean_response) / 10.0 + 5.0
-                                success = await self._speak_and_send(websocket, clean_response, ws_lock)
+                                ai_speak_expected_duration = len(ai_response) / 10.0 + 5.0
+                                success = await self._speak_and_send(websocket, ai_response, ws_lock)
                                 if not success:
-                                    print("[VOICE] TTS failed, immediately ungating microphone.")
+                                    logger.warning("[Voice] TTS failed, immediately ungating microphone.")
                                     ai_is_speaking = False
                                     await _send(websocket, {
                                         "type": "status",
-                                        "message": "🎙️ Your turn — please speak now",
+                                        "message": "Your turn -- please speak now",
                                         "state": "listening"
                                     }, ws_lock)
 
                                 if interview_ended:
-                                    print("[VOICE] AI signaled END_INTERVIEW. Closing session.")
+                                    logger.info("[Voice] Interview complete (route=end). Closing session.")
                                     await _send(websocket, {
                                         "type": "interview_complete",
                                         "message": "Interview complete! Thank you for participating."
@@ -304,12 +388,10 @@ class VoiceConnectionManager:
                             except asyncio.CancelledError:
                                 raise  # Let CancelledError propagate (session shutdown)
                             except Exception as turn_error:
-                                print(f"[VOICE] Per-turn error: {type(turn_error).__name__}: {turn_error}")
-                                import traceback
-                                traceback.print_exc()
+                                logger.error(f"[Voice] Per-turn error: {type(turn_error).__name__}: {turn_error}", exc_info=True)
                                 # Recover gracefully: notify the user and resume listening
                                 try:
-                                    recovery_msg = "I encountered a brief technical issue. Let's continue — could you please repeat or rephrase your last answer?"
+                                    recovery_msg = "I encountered a brief technical issue. Let's continue -- could you please repeat or rephrase your last answer?"
                                     ai_is_speaking = True
                                     ai_speak_start_time = time.time()
                                     ai_speak_expected_duration = len(recovery_msg) / 10.0 + 5.0
@@ -321,16 +403,20 @@ class VoiceConnectionManager:
                                     ai_is_speaking = False
                                     await _send(websocket, {
                                         "type": "status",
-                                        "message": "🎙️ Technical issue. Please speak again.",
+                                        "message": "Technical issue. Please speak again.",
                                         "state": "listening"
                                     }, ws_lock)
 
         except WebSocketDisconnect:
-            print("[VOICE] WebSocket disconnected by client.")
+            logger.info("[Voice] WebSocket disconnected by client.")
+        except RuntimeError as e:
+            # Starlette raises RuntimeError when receiving after disconnect
+            if "disconnect" in str(e).lower():
+                logger.info("[Voice] WebSocket disconnected (RuntimeError).")
+            else:
+                logger.error(f"[Voice] Session RuntimeError: {e}")
         except Exception as e:
-            print(f"[VOICE] Session error: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[Voice] Session error: {type(e).__name__}: {e}", exc_info=True)
         finally:
             # Stop the keepalive heartbeat
             stop_keepalive.set()
@@ -340,14 +426,29 @@ class VoiceConnectionManager:
             except asyncio.CancelledError:
                 pass
 
-            print(f"[VOICE] Session ended | history_turns={len(history)}")
+            # Determine message count for evaluation
+            msg_count = 0
+            eval_notes = []
+            eval_messages = []
+            if final_graph_state:
+                eval_messages = final_graph_state.get("messages", [])
+                eval_notes = final_graph_state.get("evaluation_notes", [])
+                msg_count = len(eval_messages)
+            logger.info(f"[Voice] Session ended | messages={msg_count} | eval_notes={len(eval_notes)}")
 
-            if len(history) > 2:
-                print("[VOICE] Running evaluation in background thread...")
+            if msg_count > 2:
+                logger.info("[Voice] Running evaluation in background thread...")
                 import threading
+
                 def run_eval():
                     try:
-                        report = evaluation_service.evaluate_interview(history, job_details, candidate_details)
+                        logger.info("[Voice/Eval] Background evaluation started")
+                        report = evaluation_service.evaluate_interview(
+                            history=eval_messages,
+                            job_details=job_details,
+                            candidate_details=candidate_details,
+                            evaluation_notes=eval_notes,
+                        )
                         job_id = job_details.get("job_id", 0)
                         candidate_id = candidate_details.get("candidate_id", 0)
                         if job_id and candidate_id:
@@ -356,13 +457,15 @@ class VoiceConnectionManager:
                             eval_path = os.path.join(EVAL_DIR, f"job_{job_id}_candidate_{candidate_id}.json")
                             with open(eval_path, "w") as f:
                                 json.dump(report, f, indent=4)
-                            print(f"[VOICE] Evaluation saved: {eval_path}")
+                            logger.info(f"[Voice/Eval] Evaluation saved: {eval_path}")
+                            logger.info(f"[Voice/Eval]   Verdict: {report.get('verdict')} | Tech: {report.get('technical_score')} | Behavioral: {report.get('behavioral_score')}")
                     except Exception as ex:
-                        print(f"[VOICE] Eval error: {ex}")
+                        logger.error(f"[Voice/Eval] Evaluation FAILED: {type(ex).__name__}: {ex}")
+
                 threading.Thread(target=run_eval, daemon=False).start()
 
     def _transcribe(self, audio_bytes: bytes) -> str:
-        """Convert raw PCM bytes → WAV → Whisper transcription."""
+        """Convert raw PCM bytes -> WAV -> Whisper transcription."""
         try:
             wav_io = io.BytesIO()
             with wave.open(wav_io, 'wb') as wf:
@@ -382,7 +485,7 @@ class VoiceConnectionManager:
             )
             return " ".join(seg.text for seg in segments).strip()
         except Exception as e:
-            print(f"[VOICE] Transcription error: {e}")
+            logger.error(f"[Voice] Transcription error: {e}")
             return ""
 
     async def _speak_and_send(self, websocket: WebSocket, text: str, lock: Optional[asyncio.Lock] = None) -> bool:
@@ -394,10 +497,10 @@ class VoiceConnectionManager:
         try:
             await _send(websocket, {
                 "type": "status",
-                "message": "🔊 AI is preparing to speak...",
+                "message": "AI is preparing to speak...",
                 "state": "speaking"
             }, lock)
-            print(f"[VOICE] Generating TTS for: '{text[:60]}...'")
+            logger.debug(f"[Voice] Generating TTS for: '{text[:60]}...'")
 
             communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural")
             full_audio = bytearray()
@@ -408,19 +511,19 @@ class VoiceConnectionManager:
             if full_audio:
                 b64 = base64.b64encode(full_audio).decode("utf-8")
                 await _send(websocket, {"type": "audio", "data": b64}, lock)
-                print(f"[VOICE] Audio sent: {len(full_audio)} bytes")
+                logger.info(f"[Voice] Audio sent: {len(full_audio)} bytes")
                 return True
             else:
-                print("[VOICE] Warning: TTS produced no audio. Sending speaking_done anyway.")
+                logger.warning("[Voice] Warning: TTS produced no audio. Sending speaking_done anyway.")
                 await _send(websocket, {"type": "speaking_done"}, lock)
                 return False
 
         except asyncio.CancelledError:
-            print("[VOICE] TTS cancelled (barge-in).")
+            logger.info("[Voice] TTS cancelled (barge-in).")
             await _send(websocket, {"type": "speaking_done"}, lock)
             raise
         except Exception as e:
-            print(f"[VOICE] TTS error: {e}")
+            logger.error(f"[Voice] TTS error: {e}")
             # Even on error, ungate the microphone
             await _send(websocket, {"type": "speaking_done"}, lock)
             return False
@@ -429,5 +532,12 @@ class VoiceConnectionManager:
 manager = VoiceConnectionManager()
 
 
-async def handle_voice_session(websocket: WebSocket, job_details: dict, candidate_details: dict):
-    await manager.handle_session(websocket, job_details, candidate_details)
+async def handle_voice_session(
+    websocket: WebSocket,
+    job_details: dict,
+    candidate_details: dict,
+    resume_profile: dict,
+    question_file: dict,
+):
+    """Entry point called from main.py WebSocket handler."""
+    await manager.handle_session(websocket, job_details, candidate_details, resume_profile, question_file)

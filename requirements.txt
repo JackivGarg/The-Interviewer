@@ -10,9 +10,11 @@ pydantic==2.12.5
 streamlit==1.30.0
 requests==2.31.0
 google-genai
+groq
 faster-whisper
 pdfplumber
 email-validator
 edge-tts
 numpy
 wsproto
+langgraph>=0.4.0

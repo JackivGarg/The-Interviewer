@@ -3,9 +3,14 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 import os
+import logging
+
+logger = logging.getLogger("interviewer.database")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'database.db')}"
+
+logger.info(f"[DB] Database URL: {SQLALCHEMY_DATABASE_URL}")
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
@@ -13,3 +18,5 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+logger.info("[DB] SQLAlchemy engine and session factory initialized")

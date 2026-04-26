@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import streamlit as st
 import streamlit.components.v1 as components
-from frontend.services.api import get_token, get_websocket_url
+from frontend.services.api import get_token, get_websocket_url, api
 
 st.set_page_config(page_title="Live Interview", page_icon="🎙️", layout="wide")
 
@@ -22,7 +22,62 @@ if not job_id:
     st.stop()
 
 st.title("🎙️ Live Voice Interview")
+
+# ── Phase 1: Resume Upload (mandatory) ────────────────────────────────────────
+
+if not st.session_state.get("interview_prepared"):
+    st.markdown("### Step 1: Upload your Resume")
+    st.markdown("Upload your resume PDF so the AI can tailor the interview to your background.")
+
+    uploaded_file = st.file_uploader(
+        "Upload Resume (PDF)",
+        type=["pdf"],
+        key="resume_upload",
+        help="Your resume will be used to generate personalized interview questions."
+    )
+
+    if uploaded_file is not None:
+        if st.button("Prepare Interview", type="primary"):
+            with st.spinner("Preparing your interview... (extracting profile & generating questions)"):
+                try:
+                    result = api.prepare_interview(
+                        file_bytes=uploaded_file.getvalue(),
+                        filename=uploaded_file.name,
+                        job_id=job_id,
+                    )
+                    st.session_state["interview_prepared"] = True
+                    st.session_state["resume_profile"] = result.get("resume_profile", {})
+                    st.session_state["question_file"] = result.get("question_file", {})
+
+                    st.success(f"Interview prepared in {result.get('elapsed_seconds', '?')}s! Click 'Start Interview' below.")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Failed to prepare interview: {e}")
+    else:
+        st.info("Please upload your resume PDF to continue.")
+
+    st.markdown("---")
+    if st.button("← Back to Dashboard"):
+        st.switch_page("app.py")
+    st.stop()
+
+# ── Phase 2: Live Interview ───────────────────────────────────────────────────
+
 st.markdown("Click **Start Interview** and allow microphone access. The AI interviewer will speak first, then it's your turn.")
+
+# Show a summary of what was prepared
+with st.expander("Interview Preparation Summary", expanded=False):
+    profile = st.session_state.get("resume_profile", {})
+    qf = st.session_state.get("question_file", {})
+    st.markdown(f"**Candidate:** {profile.get('name', 'N/A')}")
+    st.markdown(f"**Skills detected:** {', '.join(profile.get('skills', [])) or 'N/A'}")
+    st.markdown(f"**Experience:** {profile.get('experience_years', 'N/A')} years")
+    topics = qf.get("topics", [])
+    if topics:
+        st.markdown(f"**Interview topics ({len(topics)}):**")
+        for i, t in enumerate(topics):
+            st.markdown(f"  {i+1}. {t.get('topic', 'Unknown')} ({len(t.get('questions', []))} questions)")
 
 ws_base_url = get_websocket_url()
 
@@ -116,7 +171,7 @@ html_code = f"""
             font-family: monospace;
             font-size: 0.78em;
             color: #888;
-            max-height: 100px;
+            max-height: 120px;
             overflow-y: auto;
         }}
         .debug-panel::-webkit-scrollbar {{ width: 4px; }}
@@ -125,7 +180,7 @@ html_code = f"""
 </head>
 <body>
     <div class="container">
-        <button id="mic-btn">🎙️ Start Interview</button>
+        <button id="mic-btn">Start Interview</button>
 
         <div class="status-panel">
             <span id="status-icon">⏳</span>
@@ -272,8 +327,7 @@ html_code = f"""
                     sendWS({{ type: "pong" }});
 
                 }} else if (t === "status") {{
-                    // Update status. If AI is speaking, only allow 'thinking' or 'speaking' overrides
-                    // to avoid confusing transitions, but ensure the user sees the 'AI is thinking' lag.
+                    // Update status panel
                     if (!aiIsSpeaking || msg.state === "thinking" || msg.state === "speaking") {{
                         const statusColors = {{
                             "listening": "#15803d",
@@ -284,16 +338,16 @@ html_code = f"""
                         const color = msg.color || statusColors[msg.state] || "#1f2937";
                         setStatus(msg.icon || "⏳", msg.message, msg.state, color);
                     }}
+                    dbg("[status] " + msg.state + ": " + msg.message);
                 }} else if (t === "text") {{
                     addMessage(msg.role === 'user' ? 'user' : 'ai', msg.text);
+                    dbg("[text] " + msg.role + ": " + msg.text.substring(0, 60) + "...");
 
                 }} else if (t === "audio") {{
                     dbg("Received audio payload (" + msg.data.length + " chars b64).");
                     playAudio(msg.data);
 
                 }} else if (t === "speaking_done") {{
-                    // Fallback: server signals TTS is done (e.g., on error)
-                    // In case the audio element never fires onended, this unblocks the mic
                     dbg("Received speaking_done fallback from server.");
                     if (currentAudio) {{
                         currentAudio.pause();
